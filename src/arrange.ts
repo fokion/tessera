@@ -168,11 +168,12 @@ export function describeItem(item: LayoutItem, title: string): string {
   return `${title}, column ${item.x + 1}, row ${item.y + 1}, ${item.w} by ${item.h}.`;
 }
 
-/** Instance-set/config changes between two layouts at the same breakpoint. */
+/** Instance-set/config/position changes between two layouts at one breakpoint. */
 export interface InstanceDiff {
   added: LayoutItem[];
   removed: string[];
   updated: Array<{ id: string; config: Record<string, unknown> }>;
+  moved: LayoutItem[];
 }
 
 export function diffInstances(
@@ -191,7 +192,59 @@ export function diffInstances(
           && JSON.stringify(before.config) !== JSON.stringify(item.config);
       })
       .map((item) => ({ id: item.id, config: item.config })),
+    moved: next.filter((item) => {
+      const before = baseById.get(item.id);
+      return before
+        && (before.x !== item.x
+          || before.y !== item.y
+          || before.w !== item.w
+          || before.h !== item.h);
+    }),
   };
+}
+
+/**
+ * Three-way merge used by "Keep mine" after a save conflict.
+ *
+ * Start from the other tab's layout (*theirs*) and replay only the local
+ * instance/config/position changes made since *base*. Changes the other tab
+ * made to untouched widgets are therefore preserved instead of discarded.
+ */
+export function mergeInstanceChanges(
+  base: readonly LayoutItem[],
+  mine: readonly LayoutItem[],
+  theirs: readonly LayoutItem[],
+  specs: readonly WidgetLayoutSpec[],
+  config: DashboardConfig,
+  columns: number,
+): LayoutItem[] {
+  const diff = diffInstances(base, mine);
+  const removed = new Set(diff.removed);
+  const updated = new Map(
+    diff.updated.map((entry) => [entry.id, entry.config]),
+  );
+  const moved = new Map(diff.moved.map((item) => [item.id, item]));
+
+  const merged: LayoutItem[] = [];
+  for (const item of theirs) {
+    if (removed.has(item.id)) continue;
+    const position = moved.get(item.id);
+    const nextConfig = updated.get(item.id);
+    merged.push({
+      ...item,
+      ...(position
+        ? { x: position.x, y: position.y, w: position.w, h: position.h }
+        : {}),
+      ...(nextConfig !== undefined ? { config: nextConfig } : {}),
+    });
+  }
+
+  for (const added of diff.added) {
+    if (merged.some((item) => item.id === added.id)) continue;
+    merged.push(added);
+  }
+
+  return normaliseLayout(merged, specs, columns, {}, config);
 }
 
 function applyDiffToPrimary(

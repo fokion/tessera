@@ -48,6 +48,7 @@ export {
   describeItem,
   diffInstances,
   isArrowKey,
+  mergeInstanceChanges,
   moveTo,
   nudge,
   resizeTo,

@@ -10,6 +10,7 @@ import type {
   WidgetSpecWithConfig,
 } from './types';
 import {
+  LAYOUT_SCHEMA,
   breakpointByName,
   defaultLayout,
   firstFreeSlot,
@@ -17,7 +18,7 @@ import {
   primaryBreakpoint,
   widgetBounds,
 } from './layout';
-import { withBreakpoint } from './arrange';
+import { mergeInstanceChanges, withBreakpoint } from './arrange';
 
 export function isLayoutConflict(
   value: LayoutSaveResult,
@@ -75,10 +76,16 @@ export interface UseDashboardLayoutOptions {
   adapter: LayoutAdapter;
   /** Instances shown before anyone arranges the dashboard. */
   defaultItems?: readonly LayoutItem[];
-  /** Server-rendered state. `undefined` asks the hook to load it. */
+  /**
+   * Server-rendered state, read once when the hook mounts. `undefined` asks
+   * the hook to load from the adapter. Use `replaceSaved` for later updates;
+   * passing a fresh object on every render must not reset the dashboard.
+   */
   initial?: LayoutState | null;
   viewport?: string;
 }
+
+const NO_DEFAULT_ITEMS: readonly LayoutItem[] = [];
 
 /**
  * Merge each widget's default config into stored items and validate them.
@@ -128,7 +135,7 @@ export function useDashboardLayout({
   specs,
   config,
   adapter,
-  defaultItems = [],
+  defaultItems = NO_DEFAULT_ITEMS,
   initial,
   viewport: viewportOverride,
 }: UseDashboardLayoutOptions) {
@@ -141,8 +148,10 @@ export function useDashboardLayout({
   const [status, setStatus] = useState<SaveStatus>({ kind: 'idle' });
   const [conflict, setConflict] = useState<LayoutState | null>(null);
 
-  useEffect(() => setSaved(initial), [initial]);
-
+  // Load once on mount. Depending on `adapter` here would re-run the effect
+  // for every render when a host passes an inline object, which turns
+  // `load -> setSaved -> render` into an infinite loop and an OOM. Later
+  // refreshes go through the tab-visibility effect below or `replaceSaved`.
   useEffect(() => {
     if (initial !== undefined) return;
     let active = true;
@@ -153,7 +162,8 @@ export function useDashboardLayout({
     return () => {
       active = false;
     };
-  }, [adapter, initial]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const arranging = draft !== null;
   const rawSavedItems = useMemo(
@@ -196,23 +206,63 @@ export function useDashboardLayout({
   }, []);
 
   const resetDraft = useCallback(() => {
-    setDraft(defaultLayout(defaultItems, specs, breakpoint.columns, config));
-  }, [defaultItems, specs, breakpoint.columns, config]);
+    const primary = primaryBreakpoint(config);
+    if (breakpoint.name === primary.name) {
+      setDraft(defaultLayout(defaultItems, specs, breakpoint.columns, config));
+      return;
+    }
 
-  const save = useCallback(
-    async (version = saved?.version ?? 0) => {
-      if (!draft || !saved) return;
+    // Reset only this breakpoint to the flow of the current primary layout.
+    // Generating the default instances here would remove widgets the user
+    // added on another breakpoint when the draft is saved.
+    const primaryItems = layoutFor(
+      saved?.layout ?? null,
+      specs,
+      config,
+      primary.name,
+      defaultItems,
+    );
+    const primaryOnly: DashboardLayout = {
+      schema: LAYOUT_SCHEMA,
+      breakpoints: { [primary.name]: primaryItems },
+    };
+    setDraft(
+      layoutFor(
+        primaryOnly,
+        specs,
+        config,
+        breakpoint.name,
+        defaultItems,
+      ),
+    );
+  }, [
+    breakpoint.columns,
+    breakpoint.name,
+    config,
+    defaultItems,
+    saved?.layout,
+    specs,
+  ]);
+
+  const persistDraft = useCallback(
+    async (
+      layoutBase: DashboardLayout | null,
+      version: number,
+      baseItems: readonly LayoutItem[] | undefined,
+      nextItems: LayoutItem[] = draft ?? [],
+    ) => {
+      if (!draft) return;
       setStatus({ kind: 'saving' });
       try {
         const result = await adapter.save(
           withBreakpoint(
-            saved.layout,
+            layoutBase,
             specs,
             config,
             breakpoint.name,
-            draft,
+            nextItems,
             defaultItems,
-            savedItems,
+            baseItems,
           ),
           version,
         );
@@ -232,12 +282,21 @@ export function useDashboardLayout({
         });
       }
     },
-    [adapter, breakpoint.name, config, defaultItems, draft, saved, savedItems, specs],
+    [adapter, breakpoint.name, config, defaultItems, draft, specs],
+  );
+
+  const save = useCallback(
+    async (version = saved?.version ?? 0) => {
+      if (!draft || !saved) return;
+      await persistDraft(saved.layout, version, savedItems);
+    },
+    [draft, persistDraft, saved, savedItems],
   );
 
   /**
    * Save the current draft over a conflict. `theirs` gives up this draft and
-   * adopts the other client's layout; `mine` retries with their version.
+   * adopts the other client's layout; `mine` replays the local changes on top
+   * of their layout so their unrelated changes are not discarded.
    */
   const resolveConflict = useCallback(
     (choice: 'theirs' | 'mine') => {
@@ -248,9 +307,44 @@ export function useDashboardLayout({
         setConflict(null);
         return;
       }
-      void save(conflict.version);
+      if (!draft) {
+        void save(conflict.version);
+        return;
+      }
+      const theirsItems = layoutFor(
+        conflict.layout,
+        specs,
+        config,
+        breakpoint.name,
+        defaultItems,
+      );
+      const merged = mergeInstanceChanges(
+        savedItems,
+        draft,
+        theirsItems,
+        specs,
+        config,
+        breakpoint.columns,
+      );
+      void persistDraft(
+        conflict.layout,
+        conflict.version,
+        theirsItems,
+        merged,
+      );
     },
-    [conflict, save],
+    [
+      breakpoint.columns,
+      breakpoint.name,
+      config,
+      conflict,
+      defaultItems,
+      draft,
+      persistDraft,
+      save,
+      savedItems,
+      specs,
+    ],
   );
 
   const replaceSaved = useCallback((next: LayoutState) => {

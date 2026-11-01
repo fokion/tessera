@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.1 — 2026-11-01
+
+- "Keep mine" after a save conflict now replays the local instance, config and
+  position changes on top of the other tab's layout instead of discarding its
+  unrelated changes.
+- Reset while arranging a non-primary breakpoint now derives that breakpoint
+  from the current primary layout, so it no longer removes widgets from the
+  primary dashboard.
+- Test fixtures aligned with the v2 layout schema.
+
+## 0.3.0 — 2026-11-01
+
+- Schema 2 with `migrateLayout` for home.portal v1 layouts.
+- Per-breakpoint instance/config reconciliation.
+- `firstFreeSlot` clamping and row cap.
+- Widget config defaults/schema handling, error-boundary retry/reset and
+  light-theme-safe CSS variables.
+
 ## 0.1.0 — 2026-11-01
 
 - Initial extraction from `home.portal`'s dashboard engine.
