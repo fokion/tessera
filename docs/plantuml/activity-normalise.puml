@@ -1,0 +1,37 @@
+@startuml Tessera-Activity-Normalise
+title Tessera - normaliseLayout invariant pipeline
+
+start
+
+:Input: items, specs, columns,\noptions.pin, config;
+
+:Drop instances with unknown types;
+:Drop duplicate ids (first occurrence wins);
+:Clamp w/h to minSize, maxSize and columns;
+:Clamp x into [0, columns - w] and y to >= 0;
+:Sort the pinned tile first, then reading order;
+
+:placed = [];
+
+while (another input tile?) is (yes)
+  :Take the next tile;
+  if (pinned tile exists and this tile overlaps it?) then (yes)
+    :Try the position directly above the pinned tile;
+    if (that position is free?) then (yes)
+      :Use the position above (swap);
+    endif
+  endif
+  while (tile overlaps a placed tile?) is (yes)
+    :Move the tile down one row;
+  endwhile (no)
+  :Append the tile to placed;
+endwhile (no)
+
+:Compact: for each tile, move it upward\nwhile the row above is free;
+
+:Sort the result in reading order;
+:Return LayoutItem[];
+
+stop
+
+@enduml

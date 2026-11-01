@@ -1,0 +1,29 @@
+@startuml Tessera-C2-Container
+!include <C4/C4_Container>
+
+title Container diagram for @fokion/tessera
+
+Person(dashboardUser, "Dashboard user", "Views and arranges widgets")
+Person(hostDeveloper, "Host application developer", "Builds the dashboard page")
+
+Container_Boundary(browser, "Browser") {
+  Container(hostUi, "Host application UI", "React 19, host design system", "Pages, navigation, widget pickers, settings dialogs and the Save/Cancel controls")
+  Container(tessera, "@fokion/tessera", "TypeScript ESM, React 19, Zod 4", "Grid, Tile, useDashboardLayout, layout maths, arrange mode and conflict merge")
+  Container(adapter, "Layout adapter", "Host TypeScript", "Implements LayoutAdapter: transport, auth and compare-and-set semantics")
+}
+
+Container(layoutApi, "Layout API", "Any HTTP service", "Validates, authorises and persists dashboard layouts")
+ContainerDb(layoutStore, "Layout store", "SQL or document store", "Layout JSON plus a version/revision token")
+
+Rel(hostDeveloper, hostUi, "Builds and deploys")
+Rel(dashboardUser, hostUi, "Uses")
+Rel(hostUi, tessera, "Renders Grid and calls useDashboardLayout", "React props and hooks")
+Rel(hostUi, adapter, "Constructs and supplies")
+Rel(tessera, adapter, "Calls load, save and reset", "LayoutAdapter")
+Rel(adapter, layoutApi, "Reads and writes layouts with a version", "HTTPS / JSON")
+Rel(layoutApi, layoutStore, "Reads and writes documents")
+Rel(tessera, hostUi, "Emits items, draft state, status and conflict", "Callbacks and state")
+
+LAYOUT_WITH_LEGEND()
+
+@enduml

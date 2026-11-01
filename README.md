@@ -4,13 +4,23 @@ A configurable, unstyled dashboard grid for React 19. Tessera owns the layout
 maths, arrange mode, per-widget configuration and conflict handling; the host
 app supplies widgets and persistence.
 
+## Documentation
+
+- [Getting started](docs/getting-started.md) — install, config, first dashboard
+- [Concepts](docs/concepts.md) — instances, breakpoints, drafts, conflicts
+- [API reference](docs/api-reference.md) — every export, prop and type
+- [Architecture](docs/architecture.md) — modules, flows and design decisions
+- [C4 model](docs/c4/README.md) — context, container, component and dynamic views
+- [PlantUML diagrams](docs/plantuml/README.md) — sequence, class, state and activity views
+- [Development](docs/development.md) — tests, build, CI and diagram rendering
+
 ## Install
 
 ```bash
-pnpm add @fokion/tessera
+pnpm add @fokion/tessera react react-dom zod
 ```
 
-Peer dependencies: `react@^19`, `react-dom@^19`. `zod` is a direct dependency.
+Peer dependencies: `react@^19`, `react-dom@^19` and `zod@^4`.
 
 ## Basic usage
 
@@ -126,6 +136,10 @@ Instances are `{ id, type, config, x, y, w, h }`. Adding an instance uses
 - `start()`, `cancel()`, `save()`, `resetDraft()`, `reset()` and
   `resolveConflict('theirs' | 'mine')` are exposed.
 - A `412`/conflict adapter result is surfaced as `dashboard.conflict`.
+  `resolveConflict('mine')` replays local changes on top of the other tab's
+  layout, so unrelated remote changes survive; `'theirs'` adopts their layout.
+- `resetDraft()` resets only the active breakpoint, keeping widgets added on
+  other breakpoints.
 
 ## Styling
 

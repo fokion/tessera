@@ -1,0 +1,186 @@
+@startuml Tessera-Class-Model
+title Tessera - public contracts and their relationships
+
+skinparam classAttributeIconSize 0
+hide circle
+hide empty members
+
+package "Configuration" {
+  class DashboardConfig {
+    breakpoints: BreakpointConfig[]
+    maxItems?: number
+    maxRows?: number
+    defaultMaxSize?: GridSize
+    rowHeight?: number
+    gap?: number
+  }
+
+  class BreakpointConfig {
+    name: string
+    columns: number
+    minWidth: number
+    maxRows?: number
+  }
+
+  class GridSize {
+    w: number
+    h: number
+  }
+}
+
+package "Layout document" {
+  class LayoutItem {
+    id: string
+    type: string
+    config: Record<string, unknown>
+    x: number
+    y: number
+    w: number
+    h: number
+  }
+
+  class DashboardLayout {
+    schema: 2
+    breakpoints: Record<string, LayoutItem[]>
+  }
+
+  class LegacyDashboardLayout {
+    schema: 1
+    breakpoints: Record<string, LegacyLayoutItem[]>
+  }
+
+  class LegacyLayoutItem {
+    cell: string
+    x: number
+    y: number
+    w: number
+    h: number
+  }
+}
+
+package "Persistence" {
+  class LayoutState {
+    layout: DashboardLayout | null
+    version: number
+    updatedBy?: string | null
+    updatedAt?: string | null
+  }
+
+  class LayoutConflict {
+    conflict: true
+    current: LayoutState
+  }
+
+  interface LayoutAdapter {
+    +load(): Promise<LayoutState>
+    +save(layout: DashboardLayout, version: number): Promise<LayoutSaveResult>
+    +reset(version: number): Promise<LayoutSaveResult>
+  }
+
+  class HostLayoutAdapter {
+    +load()
+    +save(layout, version)
+    +reset(version)
+  }
+}
+
+package "Widgets" {
+  interface WidgetLayoutSpec {
+    type: string
+    sizes: GridSize[]
+    minSize?: GridSize
+    maxSize?: GridSize
+  }
+
+  interface WidgetSpecWithConfig {
+    defaultConfig?: Record<string, unknown>
+    configSchema?: ZodType
+  }
+
+  class WidgetDef {
+    type: string
+    title: string
+    description?: string
+    icon?: ReactNode
+    defaultConfig: TConfig
+    component: ComponentType<WidgetProps<TConfig>>
+    ConfigForm?: ComponentType<WidgetConfigFormProps<TConfig>>
+  }
+
+  class WidgetProps {
+    config: TConfig
+    item: LayoutItem
+    widget: WidgetDef<TConfig>
+  }
+
+  class WidgetConfigFormProps {
+    config: TConfig
+    item: LayoutItem
+    onChange: (config: TConfig) => void
+  }
+}
+
+package "Runtime" {
+  class Grid {
+    +items: LayoutItem[]
+    +widgets: AnyWidgetDef[]
+    +config: DashboardConfig
+    +viewport: string
+    +arranging: boolean
+    +onChange(items)
+    +announce(message)
+  }
+
+  class Tile {
+    +item: LayoutItem
+    +widget: AnyWidgetDef
+    +arranging?: boolean
+    +controls?: ReactNode
+  }
+
+  class UseDashboardLayout {
+    +items: LayoutItem[]
+    +draft: LayoutItem[] | null
+    +arranging: boolean
+    +conflict: LayoutState | null
+    +start()
+    +save(version?)
+    +cancel()
+    +resolveConflict(choice)
+  }
+}
+
+DashboardConfig "1" *-- "1..*" BreakpointConfig
+DashboardConfig --> GridSize : defaultMaxSize
+BreakpointConfig --> GridSize
+
+DashboardLayout "1" *-- "0..*" LayoutItem : breakpoints
+LegacyDashboardLayout "1" *-- "0..*" LegacyLayoutItem
+LegacyDashboardLayout ..> DashboardLayout : migrateLayout
+
+LayoutState "1" o-- "0..1" DashboardLayout : layout
+LayoutConflict "1" *-- "1" LayoutState : current
+LayoutAdapter ..> LayoutState : produces
+LayoutAdapter ..> DashboardLayout : consumes
+HostLayoutAdapter ..|> LayoutAdapter
+
+WidgetDef --|> WidgetLayoutSpec
+WidgetSpecWithConfig --|> WidgetLayoutSpec
+WidgetDef ..> WidgetProps : renders
+WidgetDef ..> WidgetConfigFormProps : edits
+WidgetProps --> LayoutItem
+WidgetConfigFormProps --> LayoutItem
+
+Grid "1" *-- "0..*" Tile : renders
+Grid --> LayoutItem : placement
+Grid --> DashboardConfig
+Tile --> LayoutItem
+Tile --> WidgetDef
+
+UseDashboardLayout ..> LayoutAdapter : calls
+UseDashboardLayout ..> DashboardConfig
+UseDashboardLayout ..> LayoutItem : draft and saved
+UseDashboardLayout ..> Grid : supplies items and draft
+UseDashboardLayout ..> DashboardLayout : saves via withBreakpoint
+
+@enduml

@@ -1,0 +1,49 @@
+@startuml Tessera-State-Draft
+title Tessera - loading, drafting and saving states
+
+hide empty description
+
+state "Loading" as Loading
+state "Ready" as Ready
+state "Arranging (draft)" as Arranging
+state "Saving" as Saving
+state "Conflict" as Conflict
+state "Save error" as Error
+
+[*] --> Loading : mount
+
+Loading --> Ready : initial provided
+Loading --> Ready : adapter.load resolved (saved state)
+Loading --> Ready : adapter.load rejected (saved = null, defaults)
+
+Ready --> Arranging : start()
+Ready --> Arranging : addItem / removeItem / updateItemConfig
+Arranging --> Arranging : setDraft / resetDraft
+Arranging --> Ready : cancel()
+
+Ready --> Saving : reset()
+Arranging --> Saving : save()
+
+Saving --> Ready : accepted (saved = result, draft = null)
+Saving --> Conflict : conflict response (draft kept)
+Saving --> Error : adapter or transport threw
+
+Conflict --> Ready : resolveConflict('theirs')
+Conflict --> Saving : resolveConflict('mine')
+Conflict --> Conflict : resolveConflict('mine') rejected again
+
+Error --> Arranging : edit and retry
+Error --> Ready : cancel()
+
+note right of Arranging
+  The saved state is unchanged until
+  the adapter accepts a write.
+end note
+
+note right of Conflict
+  conflict = other tab's LayoutState.
+  The local draft is still available
+  for a three-way merge.
+end note
+
+@enduml

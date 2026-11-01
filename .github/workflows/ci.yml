@@ -23,6 +23,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm docs:check
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')

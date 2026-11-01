@@ -9,6 +9,10 @@
   from the current primary layout, so it no longer removes widgets from the
   primary dashboard.
 - Test fixtures aligned with the v2 layout schema.
+- `initial` is read once at mount and the adapter load runs once, so inline
+  objects can no longer turn the hook into an infinite update loop.
+- Added long-form documentation, a C4 model and PlantUML sequence, class,
+  state and activity diagrams, with `docs:diagrams` / `docs:check` scripts.
 
 ## 0.3.0 — 2026-11-01
 

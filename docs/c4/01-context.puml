@@ -1,0 +1,23 @@
+@startuml Tessera-C1-Context
+!include <C4/C4_Context>
+
+title System Context diagram for @fokion/tessera
+
+Person(dashboardUser, "Dashboard user", "Views widgets and arranges the dashboard")
+Person(hostDeveloper, "Host application developer", "Installs Tessera, supplies widget definitions and a LayoutAdapter")
+
+System(tessera, "@fokion/tessera", "React 19 dashboard grid library: layout maths, arrange mode, widget config and conflict handling")
+
+System_Ext(hostApp, "Host application", "Owns authentication, pages, widget implementations, design system and the user experience")
+System_Ext(layoutApi, "Layout API and store", "Persists the layout document with a version token for compare-and-set writes")
+
+Rel(hostDeveloper, tessera, "Installs, configures and extends")
+Rel(dashboardUser, hostApp, "Uses")
+Rel(hostApp, tessera, "Renders Grid and calls useDashboardLayout", "React")
+Rel(hostApp, tessera, "Passes widget definitions and the LayoutAdapter", "TypeScript")
+Rel(hostApp, layoutApi, "Loads, saves and resets layouts with a version", "HTTPS / JSON")
+Rel(tessera, hostApp, "Returns items, draft state, save status and conflicts", "React state")
+
+LAYOUT_WITH_LEGEND()
+
+@enduml

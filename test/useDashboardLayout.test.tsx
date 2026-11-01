@@ -241,4 +241,24 @@ describe('useDashboardLayout config handling', () => {
       ticker: '',
     });
   });
+
+  it('keeps saved state stable when initial and adapter objects are recreated', async () => {
+    const layoutAdapter = adapter();
+    const { result, rerender } = renderHook(() =>
+      useDashboardLayout({
+        specs: [...specs],
+        config: { ...config },
+        adapter: { ...layoutAdapter },
+        initial: { ...state(null) },
+        defaultItems: [],
+      }));
+
+    await waitFor(() => expect(result.current.available).toBe(true));
+    const saved = result.current.saved;
+
+    for (let index = 0; index < 5; index += 1) rerender();
+
+    // A reset effect keyed on object identity would replace `saved` forever.
+    expect(result.current.saved).toBe(saved);
+  });
 });

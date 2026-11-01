@@ -24,6 +24,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "README.md",
     "CHANGELOG.md"
   ],
@@ -38,7 +39,9 @@
     "build": "vite build && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "docs:diagrams": "docker run --rm -v \"$PWD:/work\" -w /work plantuml/plantuml:1.2026.2 -tsvg -o /work/docs/diagrams docs/c4/*.puml docs/plantuml/*.puml",
+    "docs:check": "docker run --rm -v \"$PWD:/work\" -w /work plantuml/plantuml:1.2026.2 -checkonly docs/c4/*.puml docs/plantuml/*.puml"
   },
   "peerDependencies": {
     "react": "^19.0.0",

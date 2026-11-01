@@ -1,0 +1,36 @@
+@startuml Tessera-C4-Dynamic-Save-Conflict
+!include <C4/C4_Dynamic>
+
+title Dynamic view: resolve a save conflict with "keep mine"
+
+Person(dashboardUser, "Dashboard user", "Arranging a dashboard")
+Container(hostApp, "Host application", "React 19", "Renders the grid and the Save/Conflict controls")
+Container(hook, "useDashboardLayout", "React hook", "Owns saved state, draft, status and conflict")
+Container(arrange, "Arrange operations", "TypeScript", "mergeInstanceChanges and withBreakpoint")
+Container(layout, "Layout core", "TypeScript", "layoutFor, normaliseLayout and reconciliation")
+Container(adapter, "Layout adapter", "Host TypeScript", "compare-and-set transport")
+Container(layoutApi, "Layout API", "HTTP service", "Validates and persists layouts")
+
+Rel(dashboardUser, hostApp, "Moves a tile and clicks Save")
+Rel(hostApp, hook, "save(version)")
+Rel(hook, arrange, "withBreakpoint(base, draft)")
+Rel(arrange, layout, "normalise and reconcile")
+Rel(hook, adapter, "save(layout, version)")
+Rel(adapter, layoutApi, "PUT with If-Match")
+Rel(layoutApi, adapter, "412 + current LayoutState")
+Rel(adapter, hook, "{ conflict: true, current }")
+Rel(hook, hostApp, "conflict state, draft kept")
+Rel(dashboardUser, hostApp, "Clicks Keep my changes")
+Rel(hostApp, hook, "resolveConflict('mine')")
+Rel(hook, layout, "layoutFor(theirs)")
+Rel(hook, arrange, "mergeInstanceChanges(base, mine, theirs)")
+Rel(arrange, layout, "normalise merged layout")
+Rel(hook, adapter, "save(merged, theirs.version)")
+Rel(adapter, layoutApi, "PUT with If-Match")
+Rel(layoutApi, adapter, "accepted LayoutState")
+Rel(adapter, hook, "saved state")
+Rel(hook, hostApp, "conflict cleared, draft cleared")
+
+LAYOUT_WITH_LEGEND()
+
+@enduml

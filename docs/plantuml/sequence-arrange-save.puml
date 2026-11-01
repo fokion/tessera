@@ -1,0 +1,64 @@
+@startuml Tessera-Sequence-Arrange-Save
+title Tessera - arrange a tile, then save
+autonumber
+
+actor "Dashboard user" as User
+participant "Grid" as Grid
+participant "arrange.ts" as Arrange
+participant "layout.ts" as Layout
+participant "Host app" as Host
+participant "useDashboardLayout" as Hook
+participant "LayoutAdapter" as Adapter
+
+User -> Host: clicks Arrange
+Host -> Hook: start()
+Hook -> Hook: draft = savedItems
+Hook --> Host: arranging = true
+Host -> Grid: arranging = true
+
+group Pointer drag
+  User -> Grid: pointer down on move handle
+  Grid -> Grid: capture pointer, record start position and grid steps
+  User -> Grid: pointer move
+  Grid -> Arrange: moveTo(items, specs, config, columns, id, x, y)
+  Arrange -> Layout: normaliseLayout(items, { pin: id })
+  Layout --> Arrange: preview
+  Arrange --> Grid: preview
+  Grid -> Host: onChange(preview)
+  Host -> Hook: setDraft(preview)
+  User -> Grid: pointer up
+  Grid -> Host: onChange(final preview)
+  Grid -> Host: announce(describeItem(...))
+end
+
+group Keyboard
+  User -> Grid: arrow or Shift+arrow on handle
+  Grid -> Arrange: nudge(items, specs, config, columns, id, key, resize)
+  Arrange -> Arrange: moveTo or resizeTo
+  Arrange --> Grid: next layout or null
+  Grid -> Host: onChange(next) when changed
+  Grid -> Host: announce(moved or boundary message)
+end
+
+User -> Host: clicks Save
+Host -> Hook: save(version)
+Hook -> Arrange: withBreakpoint(saved.layout, specs, config, breakpoint, draft, defaultItems, savedItems)
+Arrange -> Layout: normalise and reconcile every breakpoint
+Arrange --> Hook: DashboardLayout
+Hook -> Adapter: save(layout, version)
+
+alt accepted
+  Adapter --> Hook: LayoutState
+  Hook -> Hook: saved = result; draft = null; conflict = null
+  Hook --> Host: arranging = false, status = idle
+else rejected with conflict
+  Adapter --> Hook: { conflict: true, current }
+  Hook -> Hook: conflict = current; keep draft
+  Hook --> Host: conflict state, status = idle
+else transport or server error
+  Adapter --> Hook: throw
+  Hook -> Hook: status = { kind: 'error' }
+  Hook --> Host: draft still intact
+end
+
+@enduml

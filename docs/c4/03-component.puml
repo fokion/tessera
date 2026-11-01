@@ -1,0 +1,51 @@
+@startuml Tessera-C3-Component
+!include <C4/C4_Component>
+
+title Component diagram for @fokion/tessera
+
+Container_Boundary(tessera, "@fokion/tessera") {
+  Component(entry, "Public entry point", "src/index.ts", "Re-exports the public API and imports the optional CSS")
+  Component(grid, "Grid", "src/components/Grid.tsx", "CSS grid, pointer drag/resize, keyboard arranging, guides, drop preview and announcements")
+  Component(tile, "Tile", "src/components/Tile.tsx", "Card shell, config merge, config-reset notice and Suspense fallback")
+  Component(boundary, "TileErrorBoundary", "src/components/ErrorBoundary.tsx", "Isolates a crashing widget and offers Retry")
+  Component(hook, "useDashboardLayout", "src/useDashboardLayout.ts", "Load, draft, save, reset, config validation and conflict resolution")
+  Component(viewport, "useViewport", "src/useDashboardLayout.ts", "Matches window.matchMedia against the configured breakpoints")
+  Component(arrange, "Arrange operations", "src/arrange.ts", "moveTo, resizeTo, nudge, diffInstances, mergeInstanceChanges, withBreakpoint")
+  Component(layout, "Layout core", "src/layout.ts", "Migration, normalisation, breakpoint reconciliation, validation and Zod schema")
+  Component(types, "Contracts", "src/types.ts", "DashboardConfig, LayoutItem, DashboardLayout, LayoutAdapter, WidgetDef")
+  Component(styles, "Default styles", "src/tessera.css", "Optional neutral theme and data-tessera-* styling")
+}
+
+Component_Ext(react, "React 19", "UI runtime", "Components, hooks, Suspense and error boundaries")
+Component_Ext(zod, "Zod 4", "Schema runtime", "Widget config schemas and layout payload validation")
+Component_Ext(adapter, "LayoutAdapter", "Host implementation", "load, save and reset at the persistence boundary")
+
+Rel(entry, grid, "Exports")
+Rel(entry, tile, "Exports")
+Rel(entry, boundary, "Exports")
+Rel(entry, hook, "Exports")
+Rel(entry, viewport, "Exports")
+Rel(entry, arrange, "Exports")
+Rel(entry, layout, "Exports")
+Rel(entry, types, "Exports types")
+
+Rel(grid, arrange, "Calls move/resize/nudge")
+Rel(grid, layout, "Reads breakpoints and reading order")
+Rel(grid, tile, "Renders one per instance")
+Rel(tile, boundary, "Wraps the widget")
+Rel(tile, types, "Uses WidgetDef and LayoutItem")
+Rel(hook, arrange, "Calls withBreakpoint and mergeInstanceChanges")
+Rel(hook, layout, "Calls layoutFor, defaultLayout, firstFreeSlot, widgetBounds")
+Rel(hook, adapter, "Calls load, save and reset")
+Rel(arrange, layout, "Uses normaliseLayout, firstFreeSlot and reconciliation")
+Rel(layout, types, "Uses shared contracts")
+Rel(layout, zod, "Builds createLayoutSchema")
+Rel(grid, react, "Renders")
+Rel(tile, react, "Renders and throws to the boundary")
+Rel(hook, react, "Uses state, effects and memo")
+
+Rel(styles, grid, "Styles via data attributes")
+
+LAYOUT_WITH_LEGEND()
+
+@enduml

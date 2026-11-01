@@ -1,0 +1,50 @@
+@startuml Tessera-Sequence-Conflict-Merge
+title Tessera - "Keep mine" three-way merge
+autonumber
+
+actor "Dashboard user" as User
+participant "Host app" as Host
+participant "useDashboardLayout" as Hook
+participant "layout.ts" as Layout
+participant "arrange.ts" as Arrange
+participant "LayoutAdapter" as Adapter
+participant "Layout API" as API
+
+Note over Hook: base  = savedItems (what this tab started from)\nNote over Hook: mine  = draft (local changes)\nNote over Hook: theirs = conflict.layout (other tab)
+
+User -> Host: clicks Keep my changes
+Host -> Hook: resolveConflict('mine')
+
+Hook -> Layout: layoutFor(conflict.layout, specs, config, breakpoint, defaultItems)
+Layout --> Hook: theirsItems
+
+Hook -> Arrange: mergeInstanceChanges(savedItems, draft, theirsItems, specs, config, columns)
+Arrange -> Arrange: diffInstances(base, mine)
+Note right of Arrange: added, removed, updated, moved
+Arrange -> Arrange: start from theirs
+Arrange -> Arrange: drop locally removed ids
+Arrange -> Arrange: replay local config and position changes
+Arrange -> Arrange: append locally added instances
+Arrange -> Layout: normaliseLayout(merged)
+Layout --> Arrange: merged
+Arrange --> Hook: merged
+
+Hook -> Arrange: withBreakpoint(conflict.layout, specs, config, breakpoint, merged, defaultItems, theirsItems)
+Arrange -> Layout: apply diff to primary, reconcile saved breakpoints
+Arrange --> Hook: DashboardLayout
+
+Hook -> Adapter: save(mergedDocument, conflict.version)
+Adapter -> API: PUT with If-Match = conflict.version
+alt accepted
+  API --> Adapter: LayoutState
+  Adapter --> Hook: LayoutState
+  Hook -> Hook: saved = result; draft = null; conflict = null
+  Hook --> Host: conflict cleared
+else conflict again
+  API --> Adapter: 412 + newer current
+  Adapter --> Hook: { conflict: true, current }
+  Hook -> Hook: conflict = newer current; keep draft
+  Hook --> Host: conflict still shown
+end
+
+@enduml

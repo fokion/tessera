@@ -1,0 +1,43 @@
+@startuml Tessera-Sequence-Load
+title Tessera - initial load and first render
+autonumber
+
+actor "Dashboard user" as User
+participant "Host app" as Host
+participant "useDashboardLayout" as Hook
+participant "useViewport" as Viewport
+participant "LayoutAdapter" as Adapter
+participant "Layout API" as API
+participant "layout.ts" as Layout
+participant "Grid / Tile" as UI
+
+Host -> Hook: render({ specs, config, adapter, initial?, defaultItems })
+Hook -> Viewport: useViewport(config)
+Viewport --> Hook: breakpoint name
+
+alt initial is provided
+  Hook -> Hook: useState(initial) — read once at mount
+else initial is undefined
+  Hook -> Adapter: load()
+  Adapter -> API: GET /dashboard/layout
+  API --> Adapter: LayoutState { layout, version }
+  Adapter --> Hook: LayoutState
+end
+
+Hook -> Layout: layoutFor(layout, specs, config, breakpoint, defaultItems)
+Layout -> Layout: coerceLayout / migrateLayout (v1 -> v2)
+alt primary breakpoint
+  Layout -> Layout: normaliseLayout(primary)
+else saved non-primary
+  Layout -> Layout: reconcileItems(saved, primary)
+else no saved layout
+  Layout -> Layout: flowInto -> firstFreeSlot -> normaliseLayout
+end
+Layout --> Hook: LayoutItem[]
+
+Hook -> Hook: applyWidgetConfig(items, specs)
+Hook --> Host: items, savedItems, breakpoint, available
+Host -> UI: <Grid items widgets config viewport arranging={false} />
+UI --> User: tiles in reading order
+
+@enduml
