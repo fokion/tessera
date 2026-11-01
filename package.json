@@ -2,6 +2,10 @@
   "name": "@fokion/tessera",
   "version": "0.1.0",
   "description": "A configurable, unstyled dashboard grid with arrange mode, per-widget config and pluggable persistence.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fokion/tessera.git"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -18,6 +22,9 @@
     "README.md",
     "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "sideEffects": [
     "**/*.css"
   ],
