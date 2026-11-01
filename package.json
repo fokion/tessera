@@ -1,6 +1,6 @@
 {
   "name": "@fokion/tessera",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A configurable, unstyled dashboard grid with arrange mode, per-widget config and pluggable persistence.",
   "private": false,
   "license": "UNLICENSED",
