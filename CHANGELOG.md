@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.1 — 2026-11-01
+## 0.4.0 — 2026-11-01
 
 - "Keep mine" after a save conflict now replays the local instance, config and
   position changes on top of the other tab's layout instead of discarding its
