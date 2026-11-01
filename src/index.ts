@@ -16,6 +16,7 @@ export type {
   WidgetDef,
   WidgetLayoutSpec,
   WidgetProps,
+  WidgetSpecWithConfig,
 } from './types';
 
 export {
@@ -24,30 +25,38 @@ export {
   MAX_LAYOUT_ROWS,
   breakpointByName,
   byReadingOrder,
+  coerceLayout,
   createLayoutSchema,
   defaultLayout,
   firstFreeSlot,
   layoutFor,
+  migrateLayout,
   normaliseDashboardLayout,
   normaliseLayout,
   overlaps,
   primaryBreakpoint,
   readingOrder,
+  reconcileItems,
   validateLayoutBounds,
   widgetBounds,
+  type LegacyDashboardLayout,
+  type LegacyLayoutItem,
 } from './layout';
 
 export {
   cellsFromPointer,
   describeItem,
+  diffInstances,
   isArrowKey,
   moveTo,
   nudge,
   resizeTo,
   withBreakpoint,
+  type InstanceDiff,
 } from './arrange';
 
 export {
+  applyWidgetConfig,
   isLayoutConflict,
   useDashboardLayout,
   useViewport,

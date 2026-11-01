@@ -80,6 +80,12 @@ export function Tile({
     item: LayoutItem;
     widget: AnyWidgetDef;
   }>;
+  const mergedConfig = { ...(widget.defaultConfig ?? {}), ...item.config };
+  const parsedConfig = widget.configSchema?.safeParse(mergedConfig);
+  const config = parsedConfig?.success
+    ? (parsedConfig.data as Record<string, unknown>)
+    : { ...(widget.defaultConfig ?? {}) };
+  const configReset = Boolean(widget.configSchema && !parsedConfig?.success);
   const titleId = `tessera-tile-${item.id}`;
   const style = {
     ...placement,
@@ -137,9 +143,17 @@ export function Tile({
         </span>
       </header>
       <div data-tessera-tile-body="" inert={arranging || undefined}>
-        <TileErrorBoundary title={widget.title}>
+        <TileErrorBoundary
+          title={widget.title}
+          resetKey={JSON.stringify(item.config)}
+        >
           <Suspense fallback={<TileSkeleton />}>
-            <Widget config={item.config} item={item} widget={widget} />
+            {configReset ? (
+              <p data-tessera-config-reset="" role="status">
+                Saved settings were invalid; showing the widget defaults.
+              </p>
+            ) : null}
+            <Widget config={config} item={item} widget={widget} />
           </Suspense>
         </TileErrorBoundary>
       </div>

@@ -5,11 +5,16 @@ import type {
   WidgetLayoutSpec,
 } from './types';
 import {
+  LAYOUT_SCHEMA,
+  coerceLayout,
   defaultLayout,
+  firstFreeSlot,
   layoutFor,
   normaliseLayout,
   primaryBreakpoint,
+  reconcileItems,
   widgetBounds,
+  type LegacyDashboardLayout,
 } from './layout';
 
 type Specs = readonly WidgetLayoutSpec[];
@@ -163,39 +168,136 @@ export function describeItem(item: LayoutItem, title: string): string {
   return `${title}, column ${item.x + 1}, row ${item.y + 1}, ${item.w} by ${item.h}.`;
 }
 
+/** Instance-set/config changes between two layouts at the same breakpoint. */
+export interface InstanceDiff {
+  added: LayoutItem[];
+  removed: string[];
+  updated: Array<{ id: string; config: Record<string, unknown> }>;
+}
+
+export function diffInstances(
+  base: readonly LayoutItem[],
+  next: readonly LayoutItem[],
+): InstanceDiff {
+  const baseById = new Map(base.map((item) => [item.id, item]));
+  const nextById = new Map(next.map((item) => [item.id, item]));
+  return {
+    added: next.filter((item) => !baseById.has(item.id)),
+    removed: [...baseById.keys()].filter((id) => !nextById.has(id)),
+    updated: next
+      .filter((item) => {
+        const before = baseById.get(item.id);
+        return before
+          && JSON.stringify(before.config) !== JSON.stringify(item.config);
+      })
+      .map((item) => ({ id: item.id, config: item.config })),
+  };
+}
+
+function applyDiffToPrimary(
+  primaryItems: readonly LayoutItem[],
+  diff: InstanceDiff,
+  specs: Specs,
+  config: DashboardConfig,
+  columns: number,
+): LayoutItem[] {
+  const removed = new Set(diff.removed);
+  const updated = new Map(diff.updated.map((entry) => [entry.id, entry.config]));
+  const items = primaryItems
+    .filter((item) => !removed.has(item.id))
+    .map((item) => (
+      updated.has(item.id)
+        ? { ...item, config: updated.get(item.id) as Record<string, unknown> }
+        : item
+    ));
+
+  for (const added of diff.added) {
+    if (items.some((item) => item.id === added.id)) continue;
+    const spec = specs.find((candidate) => candidate.type === added.type);
+    const size = spec
+      ? widgetBounds(spec, config).default
+      : { w: added.w, h: added.h };
+    items.push(firstFreeSlot(
+      items,
+      { id: added.id, type: added.type, config: added.config },
+      Math.min(size.w, columns),
+      size.h,
+      columns,
+    ));
+  }
+
+  return normaliseLayout(items, specs, columns, {}, config);
+}
+
 /**
- * The layout to save after arranging one breakpoint. The primary breakpoint
- * must always be present; other breakpoints that were never arranged stay
- * absent so they continue to derive from the primary.
+ * The layout to save after arranging one breakpoint.
+ *
+ * The primary breakpoint owns the instance set and each instance's `config`.
+ * Adding, removing or reconfiguring a widget at any breakpoint is applied to
+ * the primary list, then every saved breakpoint is reconciled against it;
+ * positions stay per-breakpoint. An unarranged non-primary breakpoint stays
+ * absent so it continues to derive from the primary.
  */
 export function withBreakpoint(
-  layout: DashboardLayout | null,
+  layout: DashboardLayout | LegacyDashboardLayout | null,
   specs: Specs,
   config: DashboardConfig,
   breakpoint: string,
   items: LayoutItem[],
   defaultItems: readonly LayoutItem[] = [],
+  baseItems?: readonly LayoutItem[],
 ): DashboardLayout {
+  const upgraded = coerceLayout(layout);
   const primary = primaryBreakpoint(config);
-  const saved = layout?.breakpoints ?? {};
-  const primaryItems = breakpoint === primary.name
-    ? items
-    : saved[primary.name]
-      ?? layoutFor(null, specs, config, primary.name, defaultItems);
+  const primarySaved = upgraded?.breakpoints[primary.name];
+  const primaryBase = primarySaved
+    ? normaliseLayout(primarySaved, specs, primary.columns, {}, config)
+    : defaultLayout(defaultItems, specs, primary.columns, config);
 
-  const breakpoints: Record<string, LayoutItem[]> = {
-    ...saved,
-    [primary.name]: primaryItems,
-    [breakpoint]: items,
-  };
-
-  // An unarranged non-primary breakpoint stays derived rather than being
-  // frozen to the current flow.
-  if (breakpoint !== primary.name && !saved[breakpoint]) {
-    breakpoints[breakpoint] = items;
+  let primaryItems: LayoutItem[];
+  if (breakpoint === primary.name) {
+    primaryItems = normaliseLayout(items, specs, primary.columns, {}, config);
+  } else {
+    const base = baseItems
+      ?? layoutFor(upgraded, specs, config, breakpoint, defaultItems);
+    primaryItems = applyDiffToPrimary(
+      primaryBase,
+      diffInstances(base, items),
+      specs,
+      config,
+      primary.columns,
+    );
   }
 
-  return { schema: 1, breakpoints };
+  const breakpoints: Record<string, LayoutItem[]> = {};
+  for (const candidate of config.breakpoints) {
+    if (candidate.name === primary.name) {
+      breakpoints[candidate.name] = primaryItems;
+      continue;
+    }
+    if (candidate.name === breakpoint) {
+      breakpoints[candidate.name] = reconcileItems(
+        items,
+        primaryItems,
+        specs,
+        candidate.columns,
+        config,
+      );
+      continue;
+    }
+    const saved = upgraded?.breakpoints[candidate.name];
+    if (saved) {
+      breakpoints[candidate.name] = reconcileItems(
+        saved,
+        primaryItems,
+        specs,
+        candidate.columns,
+        config,
+      );
+    }
+  }
+
+  return { schema: LAYOUT_SCHEMA, breakpoints };
 }
 
 export { defaultLayout };

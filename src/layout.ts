@@ -8,9 +8,72 @@ import type {
   WidgetLayoutSpec,
 } from './types';
 
-export const LAYOUT_SCHEMA = 1 as const;
+export const LAYOUT_SCHEMA = 2 as const;
 export const MAX_LAYOUT_ROWS = 500;
 export const MAX_LAYOUT_ITEMS = 100;
+
+export interface LegacyLayoutItem {
+  cell: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface LegacyDashboardLayout {
+  schema: 1;
+  breakpoints: Record<string, LegacyLayoutItem[]>;
+}
+
+/**
+ * Upgrade home.portal's v1 `{cell, …}` layout to tessera's v2
+ * `{id, type, config, …}` instances. Unknown/foreign objects return null.
+ */
+export function migrateLayout(raw: unknown): DashboardLayout | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const candidate = raw as {
+    schema?: unknown;
+    breakpoints?: unknown;
+  };
+  if (candidate.schema === LAYOUT_SCHEMA) return raw as DashboardLayout;
+  if (
+    candidate.schema !== 1
+    || !candidate.breakpoints
+    || typeof candidate.breakpoints !== 'object'
+  ) {
+    return null;
+  }
+
+  const breakpoints: Record<string, LayoutItem[]> = {};
+  for (const [name, value] of Object.entries(
+    candidate.breakpoints as Record<string, unknown>,
+  )) {
+    if (!Array.isArray(value)) continue;
+    breakpoints[name] = value.map((entry) => {
+      const item = entry as LegacyLayoutItem;
+      return {
+        id: item.cell,
+        type: item.cell,
+        config: {},
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+      };
+    });
+  }
+  return { schema: LAYOUT_SCHEMA, breakpoints };
+}
+
+/** Return a v2 layout, upgrading a v1 one when needed. */
+export function coerceLayout(
+  layout: DashboardLayout | LegacyDashboardLayout | null | undefined,
+): DashboardLayout | null {
+  if (!layout) return null;
+  return (layout as DashboardLayout).schema === LAYOUT_SCHEMA
+    ? (layout as DashboardLayout)
+    : migrateLayout(layout);
+}
 
 export function primaryBreakpoint(config: DashboardConfig): BreakpointConfig {
   return config.breakpoints[0];
@@ -73,12 +136,18 @@ export function firstFreeSlot(
   h: number,
   columns: number,
 ): LayoutItem {
-  for (let y = 0; ; y += 1) {
-    for (let x = 0; x + w <= columns; x += 1) {
-      const candidate: LayoutItem = { ...base, x, y, w, h };
+  const columnCount = Math.max(1, columns);
+  const width = Math.max(1, Math.min(w, columnCount));
+  const height = Math.max(1, h);
+  for (let y = 0; y <= MAX_LAYOUT_ROWS; y += 1) {
+    for (let x = 0; x + width <= columnCount; x += 1) {
+      const candidate: LayoutItem = { ...base, x, y, w: width, h: height };
       if (!placed.some((item) => overlaps(item, candidate))) return candidate;
     }
   }
+  throw new RangeError(
+    `No free ${width}x${height} slot in ${columnCount} columns within ${MAX_LAYOUT_ROWS} rows`,
+  );
 }
 
 function clampItem(
@@ -203,52 +272,108 @@ function flowInto(
 }
 
 /**
- * The layout to render at a breakpoint. The primary breakpoint falls back to
- * the supplied default instances; other breakpoints, when nobody arranged
- * them, are derived by flowing the primary layout into the narrower grid.
+ * Make a non-primary layout agree with the primary breakpoint: drop unknown
+ * ids, copy each instance's type/config from the primary, and place primary
+ * instances the breakpoint hasn't seen yet.
+ */
+export function reconcileItems(
+  items: readonly LayoutItem[],
+  primaryItems: readonly LayoutItem[],
+  specs: readonly WidgetLayoutSpec[],
+  columns: number,
+  config: DashboardConfig,
+): LayoutItem[] {
+  const primaryById = new Map(primaryItems.map((item) => [item.id, item]));
+  const seen = new Set<string>();
+  const reconciled: LayoutItem[] = [];
+
+  for (const item of items) {
+    const primary = primaryById.get(item.id);
+    if (!primary || seen.has(item.id)) continue;
+    seen.add(item.id);
+    // Positions and sizes are per-breakpoint; identity and config are not.
+    reconciled.push({ ...item, type: primary.type, config: primary.config });
+  }
+
+  for (const primary of primaryItems) {
+    if (seen.has(primary.id)) continue;
+    const spec = specs.find((candidate) => candidate.type === primary.type);
+    const size = spec
+      ? widgetBounds(spec, config).default
+      : { w: primary.w, h: primary.h };
+    reconciled.push(firstFreeSlot(
+      reconciled,
+      { id: primary.id, type: primary.type, config: primary.config },
+      Math.min(size.w, columns),
+      size.h,
+      columns,
+    ));
+  }
+
+  return normaliseLayout(reconciled, specs, columns, {}, config);
+}
+
+/**
+ * The layout to render at a breakpoint. The primary breakpoint is the source
+ * of truth for the instance set and each instance's config; other breakpoints
+ * keep only their positions and sizes.
  */
 export function layoutFor(
-  layout: DashboardLayout | null | undefined,
+  layout: DashboardLayout | LegacyDashboardLayout | null | undefined,
   specs: readonly WidgetLayoutSpec[],
   config: DashboardConfig,
   breakpointName: string,
   defaultItems: readonly LayoutItem[] = [],
 ): LayoutItem[] {
+  const upgraded = coerceLayout(layout);
   const breakpoint = breakpointByName(config, breakpointName)
     ?? primaryBreakpoint(config);
-  const saved = layout?.breakpoints[breakpoint.name];
-  if (saved) return normaliseLayout(saved, specs, breakpoint.columns, {}, config);
-
   const primary = primaryBreakpoint(config);
-  if (breakpoint.name === primary.name) {
-    return defaultLayout(defaultItems, specs, breakpoint.columns, config);
-  }
-
-  const primarySaved = layout?.breakpoints[primary.name];
+  const primarySaved = upgraded?.breakpoints[primary.name];
   const primaryItems = primarySaved
     ? normaliseLayout(primarySaved, specs, primary.columns, {}, config)
     : defaultLayout(defaultItems, specs, primary.columns, config);
+
+  if (breakpoint.name === primary.name) return primaryItems;
+
+  const saved = upgraded?.breakpoints[breakpoint.name];
+  if (saved) {
+    return reconcileItems(
+      saved,
+      primaryItems,
+      specs,
+      breakpoint.columns,
+      config,
+    );
+  }
   return flowInto(primaryItems, breakpoint.columns, specs, config);
 }
 
 /** Normalise every breakpoint a stored layout carries. */
 export function normaliseDashboardLayout(
-  layout: DashboardLayout,
+  layout: DashboardLayout | LegacyDashboardLayout,
   specs: readonly WidgetLayoutSpec[],
   config: DashboardConfig,
 ): DashboardLayout {
+  const upgraded = coerceLayout(layout);
+  const primary = primaryBreakpoint(config);
+  const primarySaved = upgraded?.breakpoints[primary.name];
+  const primaryItems = primarySaved
+    ? normaliseLayout(primarySaved, specs, primary.columns, {}, config)
+    : [];
+
   const breakpoints: Record<string, LayoutItem[]> = {};
   for (const breakpoint of config.breakpoints) {
-    const items = layout.breakpoints[breakpoint.name];
-    if (items) {
-      breakpoints[breakpoint.name] = normaliseLayout(
-        items,
+    if (!upgraded?.breakpoints[breakpoint.name]) continue;
+    breakpoints[breakpoint.name] = breakpoint.name === primary.name
+      ? primaryItems
+      : reconcileItems(
+        upgraded.breakpoints[breakpoint.name],
+        primaryItems,
         specs,
         breakpoint.columns,
-        {},
         config,
       );
-    }
   }
   return { schema: LAYOUT_SCHEMA, breakpoints };
 }
@@ -259,12 +384,14 @@ export function normaliseDashboardLayout(
  * bounds means the client is out of date, so it is reported instead.
  */
 export function validateLayoutBounds(
-  layout: DashboardLayout,
+  layout: DashboardLayout | LegacyDashboardLayout,
   specs: readonly WidgetLayoutSpec[],
   config: DashboardConfig,
 ): string | null {
+  const upgraded = coerceLayout(layout);
+  if (!upgraded) return 'invalid layout';
   const known = specMap(specs);
-  for (const [breakpointName, items] of Object.entries(layout.breakpoints)) {
+  for (const [breakpointName, items] of Object.entries(upgraded.breakpoints)) {
     const breakpoint = breakpointByName(config, breakpointName);
     if (!breakpoint) return `unknown breakpoint "${breakpointName}"`;
     const seen = new Set<string>();
@@ -316,7 +443,7 @@ export function createLayoutSchema(config: DashboardConfig) {
       const breakpoint = breakpointByName(config, name);
       if (!breakpoint) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           path: ['breakpoints', name],
           message: `unknown breakpoint "${name}"`,
         });
@@ -325,7 +452,7 @@ export function createLayoutSchema(config: DashboardConfig) {
       for (const [index, placed] of items.entries()) {
         if (placed.x + placed.w > breakpoint.columns) {
           ctx.addIssue({
-            code: z.ZodIssueCode.custom,
+            code: 'custom',
             path: ['breakpoints', name, index],
             message: `"${placed.id}" does not fit in ${breakpoint.columns} columns`,
           });

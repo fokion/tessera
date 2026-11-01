@@ -43,7 +43,7 @@ export interface LayoutItem {
 }
 
 export interface DashboardLayout {
-  schema: 1;
+  schema: 2;
   breakpoints: Record<string, LayoutItem[]>;
 }
 
@@ -79,6 +79,12 @@ export interface WidgetLayoutSpec {
   sizes: GridSize[];
   minSize?: GridSize;
   maxSize?: GridSize;
+}
+
+/** A widget spec plus the config defaults/schema used by the hook. */
+export interface WidgetSpecWithConfig extends WidgetLayoutSpec {
+  defaultConfig?: Record<string, unknown>;
+  configSchema?: ZodType;
 }
 
 export interface WidgetProps<TConfig = Record<string, unknown>> {

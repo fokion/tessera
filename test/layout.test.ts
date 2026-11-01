@@ -3,10 +3,13 @@ import type { LayoutItem } from '../src/types';
 import {
   createLayoutSchema,
   defaultLayout,
+  firstFreeSlot,
   layoutFor,
+  migrateLayout,
   normaliseDashboardLayout,
   normaliseLayout,
   readingOrder,
+  reconcileItems,
   validateLayoutBounds,
   widgetBounds,
 } from '../src/layout';
@@ -251,7 +254,7 @@ describe('normaliseLayout', () => {
 
 describe('layoutFor', () => {
   const arranged = {
-    schema: 1 as const,
+    schema: 2 as const,
     breakpoints: {
       lg: [
         item('calendar', 'calendar', 0, 0, 4, 2),
@@ -282,10 +285,11 @@ describe('layoutFor', () => {
     ]);
   });
 
-  it('uses an arranged md layout as is', () => {
+  it('reconciles an arranged md layout with the primary instance set', () => {
     const md = [
       item('manuals', 'manuals', 0, 0, 2, 1),
       item('weather', 'weather', 0, 1, 1, 2),
+      item('retired', 'food', 0, 6, 2, 1),
     ];
     const result = layoutFor(
       { ...arranged, breakpoints: { ...arranged.breakpoints, md } },
@@ -294,7 +298,31 @@ describe('layoutFor', () => {
       'md',
       DEFAULT_ITEMS,
     );
-    expect(result.slice(0, 2)).toEqual(md);
+    expect(result.slice(0, 2)).toEqual(md.slice(0, 2));
+    // Extra saved ids are dropped and primary instances are added back.
+    expect(result.map((entry) => entry.id).sort()).toEqual(
+      arranged.breakpoints.lg.map((entry) => entry.id).sort(),
+    );
+    expect(result.some((entry) => entry.id === 'retired')).toBe(false);
+  });
+
+  it('copies config from the primary breakpoint', () => {
+    const lg = arranged.breakpoints.lg.map((entry) =>
+      entry.id === 'weather' ? { ...entry, config: { units: 'C' } } : entry
+    );
+    const md = [
+      item('weather', 'weather', 0, 0, 1, 2, { units: 'F' }),
+    ];
+    const result = layoutFor(
+      { schema: 2, breakpoints: { lg, md } },
+      SPECS,
+      CONFIG,
+      'md',
+      DEFAULT_ITEMS,
+    );
+    expect(result.find((entry) => entry.id === 'weather')?.config).toEqual({
+      units: 'C',
+    });
   });
 
   it('flows into the one-column breakpoint', () => {
@@ -306,7 +334,7 @@ describe('layoutFor', () => {
 
 describe('validateLayoutBounds', () => {
   const layout = (lg: LayoutItem[], md?: LayoutItem[]) => ({
-    schema: 1 as const,
+    schema: 2 as const,
     breakpoints: { lg, ...(md ? { md } : {}) },
   });
 
@@ -347,7 +375,7 @@ describe('validateLayoutBounds', () => {
     [
       'an unknown breakpoint',
       {
-        schema: 1 as const,
+        schema: 2 as const,
         breakpoints: { xl: [item('weather', 'weather', 0, 0, 2, 2)] },
       },
       /unknown breakpoint "xl"/,
@@ -361,7 +389,7 @@ describe('normaliseDashboardLayout', () => {
   it('normalises known breakpoints and drops unknown ones', () => {
     const result = normaliseDashboardLayout(
       {
-        schema: 1,
+        schema: 2,
         breakpoints: {
           lg: [item('ghost', 'ghost', 0, 0, 1, 1)],
           xl: [item('weather', 'weather', 0, 0, 2, 2)],
@@ -379,10 +407,10 @@ describe('createLayoutSchema', () => {
   const schema = createLayoutSchema(CONFIG);
 
   it('accepts a valid layout with and without md', () => {
-    expect(schema.safeParse({ schema: 1, breakpoints: { lg: [] } }).success).toBe(true);
+    expect(schema.safeParse({ schema: 2, breakpoints: { lg: [] } }).success).toBe(true);
     expect(
       schema.safeParse({
-        schema: 1,
+        schema: 2,
         breakpoints: {
           lg: [item('weather', 'weather', 0, 0, 2, 2)],
           md: [],
@@ -393,19 +421,19 @@ describe('createLayoutSchema', () => {
 
   it.each([
     ['an unknown schema version', { schema: 2, breakpoints: { lg: [] } }],
-    ['an extra top-level key', { schema: 1, breakpoints: { lg: [] }, extra: true }],
-    ['an unknown breakpoint', { schema: 1, breakpoints: { xl: [] } }],
+    ['an extra top-level key', { schema: 2, breakpoints: { lg: [] }, extra: true }],
+    ['an unknown breakpoint', { schema: 2, breakpoints: { xl: [] } }],
     [
       'a fractional coordinate',
       {
-        schema: 1,
+        schema: 2,
         breakpoints: { lg: [{ ...item('weather', 'weather', 0, 0, 2, 2), x: 0.5 }] },
       },
     ],
     [
       'a tile wider than the grid',
       {
-        schema: 1,
+        schema: 2,
         breakpoints: { lg: [item('weather', 'weather', 0, 0, 5, 2)] },
       },
     ],
@@ -427,5 +455,71 @@ describe('widgetBounds', () => {
         { ...CONFIG, defaultMaxSize: { w: 6, h: 3 } },
       ).max,
     ).toEqual({ w: 6, h: 3 });
+  });
+});
+
+describe('migrateLayout', () => {
+  it('upgrades a home.portal v1 cell layout to v2 instances', () => {
+    const legacy = {
+      schema: 1 as const,
+      breakpoints: {
+        lg: [{ cell: 'weather', x: 0, y: 1, w: 2, h: 2 }],
+      },
+    };
+    expect(migrateLayout(legacy)).toEqual({
+      schema: 2,
+      breakpoints: {
+        lg: [item('weather', 'weather', 0, 1, 2, 2)],
+      },
+    });
+  });
+
+  it('returns null for unknown layouts and v2 passes through', () => {
+    expect(migrateLayout(null)).toBeNull();
+    expect(migrateLayout({ schema: 3 })).toBeNull();
+    const v2 = { schema: 2 as const, breakpoints: {} };
+    expect(migrateLayout(v2)).toEqual(v2);
+  });
+});
+
+describe('firstFreeSlot', () => {
+  it('clamps an over-wide request instead of hanging', () => {
+    expect(
+      firstFreeSlot([], { id: 'wide', type: 'weather', config: {} }, 99, 2, 4),
+    ).toEqual(item('wide', 'weather', 0, 0, 4, 2));
+    expect(
+      firstFreeSlot([], { id: 'narrow', type: 'weather', config: {} }, 2, 2, 0),
+    ).toEqual(item('narrow', 'weather', 0, 0, 1, 2));
+  });
+
+  it('throws after the row cap instead of looping forever', () => {
+    const placed = Array.from({ length: 501 }, (_, y) =>
+      item(`filled-${y}`, 'weather', 0, y, 4, 1)
+    );
+    expect(() =>
+      firstFreeSlot(placed, { id: 'new', type: 'weather', config: {} }, 4, 1, 4)
+    ).toThrow(RangeError);
+  });
+});
+
+describe('reconcileItems', () => {
+  it('drops extra ids, adds missing primary ids and copies config', () => {
+    const primary = [
+      item('weather', 'weather', 0, 0, 2, 2, { units: 'C' }),
+      item('calendar', 'calendar', 2, 0, 2, 2, { view: 'day' }),
+    ];
+    const saved = [
+      item('weather', 'weather', 0, 0, 1, 2, { units: 'F' }),
+      item('retired', 'food', 0, 2, 2, 1),
+    ];
+    const result = reconcileItems(saved, primary, SPECS, 2, CONFIG);
+    expect(result.map((entry) => entry.id).sort()).toEqual([
+      'calendar',
+      'weather',
+    ]);
+    expect(result.find((entry) => entry.id === 'weather')?.config).toEqual({
+      units: 'C',
+    });
+    expect(result.some((entry) => entry.id === 'retired')).toBe(false);
   });
 });

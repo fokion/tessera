@@ -3,6 +3,8 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 interface Props {
   title: string;
   children: ReactNode;
+  /** Change this (e.g. serialised config) to clear a previous error. */
+  resetKey?: string;
 }
 
 interface State {
@@ -11,7 +13,8 @@ interface State {
 
 /**
  * Every tile is isolated: a crashing widget becomes one broken card, not a
- * blank dashboard.
+ * blank dashboard. A changed `resetKey` clears the error so fixing a config
+ * does not leave the tile stuck.
  */
 export class TileErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
@@ -20,6 +23,12 @@ export class TileErrorBoundary extends Component<Props, State> {
     return {
       error: error instanceof Error ? error : new Error(String(error)),
     };
+  }
+
+  componentDidUpdate(previous: Props): void {
+    if (previous.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
@@ -37,7 +46,7 @@ export class TileErrorBoundary extends Component<Props, State> {
             data-tessera-button
             onClick={() => this.setState({ error: null })}
           >
-            Try again
+            Retry
           </button>
         </div>
       );

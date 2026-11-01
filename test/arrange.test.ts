@@ -8,7 +8,7 @@ import {
   resizeTo,
   withBreakpoint,
 } from '../src/arrange';
-import { defaultLayout, normaliseLayout } from '../src/layout';
+import { defaultLayout, firstFreeSlot, normaliseLayout } from '../src/layout';
 import {
   CONFIG,
   DEFAULT_ITEMS,
@@ -116,7 +116,7 @@ describe('withBreakpoint', () => {
   it('stores desktop changes in the primary breakpoint', () => {
     expect(
       withBreakpoint(null, SPECS, CONFIG, 'lg', arranged, START),
-    ).toEqual({ schema: 1, breakpoints: { lg: arranged } });
+    ).toEqual({ schema: 2, breakpoints: { lg: arranged } });
   });
 
   it('keeps the primary breakpoint when only md is arranged', () => {
@@ -125,10 +125,10 @@ describe('withBreakpoint', () => {
     expect(fromNothing.breakpoints.md).toEqual(md);
     expect(fromNothing.breakpoints.lg).toEqual(START);
 
-    const saved = { schema: 1 as const, breakpoints: { lg: arranged } };
+    const saved = { schema: 2 as const, breakpoints: { lg: arranged } };
     expect(
       withBreakpoint(saved, SPECS, CONFIG, 'md', md, START),
-    ).toEqual({ schema: 1, breakpoints: { lg: arranged, md } });
+    ).toEqual({ schema: 2, breakpoints: { lg: arranged, md } });
   });
 
   it('uses per-widget bounds from the widget registry', () => {
@@ -139,5 +139,66 @@ describe('withBreakpoint', () => {
     const items = [item('wide', 'wide', 0, 0, 3, 1)];
     const resized = resizeTo(items, boundedSpecs, CONFIG, 4, 'wide', 9, 9);
     expect(at(resized, 'wide')).toMatchObject({ w: 4, h: 2 });
+  });
+});
+
+describe('breakpoint instance reconciliation', () => {
+  const md = defaultLayout(DEFAULT_ITEMS, SPECS, 2, CONFIG);
+  const savedBoth = {
+    schema: 2 as const,
+    breakpoints: { lg: START, md },
+  };
+
+  it('propagates a widget added on the primary breakpoint to saved md', () => {
+    const specs = [...SPECS, spec('kpi', [{ w: 1, h: 1 }])];
+    const added = firstFreeSlot(
+      START,
+      { id: 'kpi', type: 'kpi', config: { metric: 'cash' } },
+      1,
+      1,
+      4,
+    );
+    const layout = withBreakpoint(
+      savedBoth,
+      specs,
+      CONFIG,
+      'lg',
+      [...START, added],
+      START,
+    );
+    expect(layout.breakpoints.md?.some((entry) => entry.id === 'kpi')).toBe(true);
+  });
+
+  it('propagates a removal made on md back to the primary breakpoint', () => {
+    const withoutWeather = md.filter((entry) => entry.id !== 'weather');
+    const layout = withBreakpoint(
+      savedBoth,
+      SPECS,
+      CONFIG,
+      'md',
+      withoutWeather,
+      START,
+      md,
+    );
+    expect(layout.breakpoints.lg.some((entry) => entry.id === 'weather')).toBe(false);
+    expect(layout.breakpoints.md?.some((entry) => entry.id === 'weather')).toBe(false);
+  });
+
+  it('propagates a config change made on md to the primary breakpoint', () => {
+    const configured = md.map((entry) =>
+      entry.id === 'weather' ? { ...entry, config: { units: 'F' } } : entry
+    );
+    const layout = withBreakpoint(
+      savedBoth,
+      SPECS,
+      CONFIG,
+      'md',
+      configured,
+      START,
+      md,
+    );
+    expect(
+      layout.breakpoints.lg.find((entry) => entry.id === 'weather')?.config,
+    ).toEqual({ units: 'F' });
   });
 });

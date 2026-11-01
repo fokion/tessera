@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   DashboardConfig,
   DashboardLayout,
@@ -7,7 +7,7 @@ import type {
   LayoutItem,
   LayoutSaveResult,
   LayoutState,
-  WidgetLayoutSpec,
+  WidgetSpecWithConfig,
 } from './types';
 import {
   breakpointByName,
@@ -70,7 +70,7 @@ function newItemId(): string {
 }
 
 export interface UseDashboardLayoutOptions {
-  specs: readonly WidgetLayoutSpec[];
+  specs: readonly WidgetSpecWithConfig[];
   config: DashboardConfig;
   adapter: LayoutAdapter;
   /** Instances shown before anyone arranges the dashboard. */
@@ -78,6 +78,42 @@ export interface UseDashboardLayoutOptions {
   /** Server-rendered state. `undefined` asks the hook to load it. */
   initial?: LayoutState | null;
   viewport?: string;
+}
+
+/**
+ * Merge each widget's default config into stored items and validate them.
+ * Invalid configs fall back to the widget defaults rather than crashing the
+ * tile.
+ */
+export function applyWidgetConfig(
+  items: readonly LayoutItem[],
+  specs: readonly WidgetSpecWithConfig[],
+): LayoutItem[] {
+  return items.map((item) => {
+    const spec = specs.find((candidate) => candidate.type === item.type);
+    if (!spec) return item;
+    const merged = { ...(spec.defaultConfig ?? {}), ...item.config };
+    if (!spec.configSchema) return { ...item, config: merged };
+    const parsed = spec.configSchema.safeParse(merged);
+    return {
+      ...item,
+      config: parsed.success
+        ? (parsed.data as Record<string, unknown>)
+        : { ...(spec.defaultConfig ?? {}) },
+    };
+  });
+}
+
+function configFor(
+  spec: WidgetSpecWithConfig,
+  override: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const merged = { ...(spec.defaultConfig ?? {}), ...(override ?? {}) };
+  if (!spec.configSchema) return merged;
+  const parsed = spec.configSchema.safeParse(merged);
+  return parsed.success
+    ? (parsed.data as Record<string, unknown>)
+    : { ...(spec.defaultConfig ?? {}) };
 }
 
 /**
@@ -120,14 +156,24 @@ export function useDashboardLayout({
   }, [adapter, initial]);
 
   const arranging = draft !== null;
-  const savedItems = layoutFor(
-    saved?.layout ?? null,
-    specs,
-    config,
-    breakpoint.name,
-    defaultItems,
+  const rawSavedItems = useMemo(
+    () => layoutFor(
+      saved?.layout ?? null,
+      specs,
+      config,
+      breakpoint.name,
+      defaultItems,
+    ),
+    [saved?.layout, specs, config, breakpoint.name, defaultItems],
   );
-  const items = draft ?? savedItems;
+  const savedItems = useMemo(
+    () => applyWidgetConfig(rawSavedItems, specs),
+    [rawSavedItems, specs],
+  );
+  const items = useMemo(
+    () => (draft ? applyWidgetConfig(draft, specs) : savedItems),
+    [draft, savedItems, specs],
+  );
 
   // Pick up changes saved elsewhere when this tab comes back into view.
   useEffect(() => {
@@ -166,6 +212,7 @@ export function useDashboardLayout({
             breakpoint.name,
             draft,
             defaultItems,
+            savedItems,
           ),
           version,
         );
@@ -185,7 +232,7 @@ export function useDashboardLayout({
         });
       }
     },
-    [adapter, breakpoint.name, config, defaultItems, draft, saved, specs],
+    [adapter, breakpoint.name, config, defaultItems, draft, saved, savedItems, specs],
   );
 
   /**
@@ -249,22 +296,28 @@ export function useDashboardLayout({
       const maxItems = config.maxItems ?? Number.POSITIVE_INFINITY;
       const base = draft ?? savedItems;
       if (base.length >= maxItems) return null;
+      const configValue = configFor(spec, configOverride);
       const size = widgetBounds(spec, config).default;
       const width = Math.min(size.w, breakpoint.columns);
       const height = size.h;
-      const item = firstFreeSlot(
-        base,
-        {
-          id: newItemId(),
-          type,
-          config: { ...(configOverride ?? {}) },
-        },
-        width,
-        height,
-        breakpoint.columns,
-      );
-      setDraft([...base, item]);
-      return item;
+      try {
+        const item = firstFreeSlot(
+          base,
+          {
+            id: newItemId(),
+            type,
+            config: configValue,
+          },
+          width,
+          height,
+          breakpoint.columns,
+        );
+        setDraft([...base, item]);
+        return item;
+      } catch (error) {
+        if (error instanceof RangeError) return null;
+        throw error;
+      }
     },
     [breakpoint.columns, config, draft, savedItems, specs],
   );
@@ -279,12 +332,16 @@ export function useDashboardLayout({
   const updateItemConfig = useCallback(
     (id: string, next: Record<string, unknown>) => {
       withDraft((current) =>
-        current.map((item) =>
-          item.id === id ? { ...item, config: next } : item,
-        ),
+        current.map((item) => {
+          if (item.id !== id) return item;
+          const spec = specs.find((candidate) => candidate.type === item.type);
+          if (!spec) return { ...item, config: next };
+          const configValue = configFor(spec, next);
+          return { ...item, config: configValue };
+        }),
       );
     },
-    [withDraft],
+    [specs, withDraft],
   );
 
   return {
