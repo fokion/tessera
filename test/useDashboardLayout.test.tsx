@@ -64,12 +64,13 @@ describe('applyWidgetConfig', () => {
 describe('useDashboardLayout config handling', () => {
   it('applies defaultConfig when adding a widget', async () => {
     const layoutAdapter = adapter();
+    const initial = state(null);
     const { result } = renderHook(() => useDashboardLayout({
       specs,
       config,
       adapter: layoutAdapter,
       defaultItems: [],
-      initial: state(null),
+      initial,
     }));
 
     await waitFor(() => expect(result.current.available).toBe(true));
@@ -82,12 +83,13 @@ describe('useDashboardLayout config handling', () => {
 
   it('falls back to defaults for an invalid config override', async () => {
     const layoutAdapter = adapter();
+    const initial = state(null);
     const { result } = renderHook(() => useDashboardLayout({
       specs,
       config,
       adapter: layoutAdapter,
       defaultItems: [],
-      initial: state(null),
+      initial,
     }));
 
     await waitFor(() => expect(result.current.available).toBe(true));

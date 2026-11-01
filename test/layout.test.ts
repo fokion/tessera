@@ -420,7 +420,7 @@ describe('createLayoutSchema', () => {
   });
 
   it.each([
-    ['an unknown schema version', { schema: 2, breakpoints: { lg: [] } }],
+    ['an unknown schema version', { schema: 3, breakpoints: { lg: [] } }],
     ['an extra top-level key', { schema: 2, breakpoints: { lg: [] }, extra: true }],
     ['an unknown breakpoint', { schema: 2, breakpoints: { xl: [] } }],
     [
